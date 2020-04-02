@@ -1,0 +1,17 @@
+bbox_cars/
+Center_net/
+data/
+frame_reid/
+info/
+ori_info/
+reidentify/
+result/
+result_car_only/
+sampled_frames/
+small_info/
+small_vehicle_detector_pretrain/
+video_reid/
+video_visualize/
+tf-faster-rcnn/output/
+tf-faster-rcnn/data/
+tf-faster-rcnn/docker/

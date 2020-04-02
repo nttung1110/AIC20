@@ -1,0 +1,2 @@
+result, small_info, ori_info: stored bounding box for cars
+info: stored combination of all three above files and then prune bbox(format bbox[4] score frame_id)
