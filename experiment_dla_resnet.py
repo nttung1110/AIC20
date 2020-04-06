@@ -1,13 +1,12 @@
-import pickle 
+import json
 import numpy as np
 import os
 import time
 import cv2
-info_centernet_out = "./Center_net/info_new"
-bbox_path = "./Center_net/new_bboxes/bboxes"
+bbox_dla_path = "./dla_backbone/json_frames_dla_34"
+bbox_resnet_path = "./resnet50_backbone/json_frames_res_50"
 PATH_VID = "./data/AIC20_track1/Dataset_A"
-out_visualized_path = "./Center_net/visualized_centernet/"
-PATH_RESULT = './Center_net/tracking'
+format_bbox_path = "./dla_backbone/info_split/"
 THRESH = 0.3
 def check_reidentify_info():
     for file_name in os.listdir(PATH_RESULT):
@@ -16,14 +15,15 @@ def check_reidentify_info():
         print(bbox[3])
         print(bbox[4])
         break
-def read_bbox_centernet():
-    for vid_name in os.listdir(bbox_path):
+def read_bbox(bbox_path):
+    for vid_name in os.listdir(bbox__path):
 
         file_content = open(os.path.join(bbox_path,vid_name),'rb')
-        bbox = pickle.load(file_content)
+        bbox = json.load(file_content)
+        print(bbox[0].keys())
         LENGTH_FRAME = len(bbox)
         duration = time.time()
-
+        return
         video_name = vid_name[:-8]
         input = cv2.VideoCapture(PATH_VID + '/' + video_name + '.mp4')
         print(PATH_VID + '/' + video_name + '.mp4')
@@ -78,7 +78,7 @@ def format_bbox():
         np.save('./Center_net/info_new/info_%s.mp4' % vid_name[:-8], info_list)
         file_content.close()
 
-def format_bbox_split():
+def format_bbox_split(num_skip, bbox_path):
     '''
         receive each file as list of frame containing bbox stored in dictionary
         (key 3 and 8 are car and truck)'''
@@ -86,27 +86,21 @@ def format_bbox_split():
         print("Processing video", vid_name)
         info_list = []
         file_content = open(os.path.join(bbox_path,vid_name),'rb')
-        bbox = pickle.load(file_content)
-        for fr_id, fr_content in enumerate(bbox):
+        bbox = json.load(file_content)
+        frame_set = set()
+        for box in bbox:
             # car_and_truck_bboxes = np.concatenate((fr_content[1], fr_content[2]), axis=0)
-            car_bboxes = fr_content[1]
-            truck_bboxes = fr_content[2]
-            for c_box in car_bboxes:
-                if(c_box[-1]< THRESH):
-                    continue
-                info_list.append(c_box[:4].tolist()+[c_box[-1], fr_id+1, 1]) #car
-            for t_box in truck_bboxes:
-                if(t_box[-1]< THRESH):
-                    continue
-                info_list.append(t_box[:4].tolist()+[t_box[-1], fr_id+1, 2]) #truck
+            fr_id = int(box['image_name'].split("_")[-1][:-4])
+            frame_set.add(box['image_name'])
+            if fr_id%num_skip == 0:
+                if box["score"] >= THRESH:
+                    info_list.append(box["bbox"]+[box["score"], fr_id+1, box["category_id"]]) #car
 
+        print(frame_set)
         info_list = np.asarray(info_list)
-        np.save('./Center_net/info_split/info_%s.mp4' % vid_name[:-8], info_list)
+        np.save(format_bbox_path + 'info_%s.mp4' % vid_name[:-4], info_list)
         file_content.close()
+        break
 
 if __name__ == "__main__":
-    # format_bbox()
-    # read_bbox_centernet()
-    # format_bbox_split()
-    check_reidentify_info()
-
+    format_bbox_split(1, bbox_dla_path)

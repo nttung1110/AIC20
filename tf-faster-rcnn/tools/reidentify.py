@@ -8,15 +8,17 @@ RATE = 0.6
 EPS = 1E-7;
 
 # PATH_DATA = '../info'
-PATH_DATA = '../Center_net/info_new'
-PATH_RESULT = '../Center_net/reidentify'
+# PATH_DATA = '../Center_net/info_new'
+PATH_DATA = '../Center_net/info_split'
+# PATH_RESULT = '../Center_net/reidentify'
+PATH_RESULT = '../Center_net/tracking'
 # PATH_RESULT = '../reidentify'
 PATH_VID = '../data/AIC20_track1/Dataset_A'
 # PATH_SVID = '../video_reid'
 PATH_SVID = '../Center_net/video_reid_small_frame_interval'
 PATH_SFRA = '../Center_net/frame_reid'
 # PATH_SFRA = '../frame_reid'
-IS_VISUALIZE = True
+IS_VISUALIZE = False
 LENGTH_FRAME = 900
 
 def overlap(anchor, other):
@@ -108,9 +110,54 @@ def process(video_name, delta=10):
     duration = time.time() - duration
     print ('Finish Writing Video takes %f second' % duration)
 
+def process_split(video_name, delta=10):
+    COUNT = 0
+    # video_name = video_name.split('.')[0]
+    labels = np.load(PATH_DATA + '/info_' + video_name + '.npy')
+    N = labels.shape[0]
+    frame_id = labels[:, -2].astype(np.int).reshape(N)
+    object_index = -1 * np.ones((labels.shape[0], ), dtype=np.int)
+    print ('Process video %s' % video_name)
+    print ('Re-identify Object ...', labels.shape)
+    duration = time.time()
+    delta_fix = delta
+    for idx in range(1, LENGTH_FRAME + 1):
+        cur_index = np.where(frame_id == idx)[0]
+        for i in cur_index:
+            cur_frame = labels[i]
+            best_id = -1
+            best_rate = 0.0
+            for delta in range(1, delta_fix):
+                pre_index = np.where(frame_id == (idx - delta))[0]
+                for j in pre_index:
+                    pre_frame = labels[j]
+                    rate = overlap(cur_frame, pre_frame)
+                    if (rate > best_rate):
+                        best_rate = rate
+                        best_id = j
+            if (best_rate + EPS >= RATE):
+                object_index[i] = object_index[best_id]
+            else:
+                COUNT = COUNT + 1
+                object_index[i] = COUNT
+        # if idx==5:
+        #     break
+
+    duration = time.time() - duration
+    print ('Finish Re-identify Object  takes %f second' % duration)
+    res = np.zeros((N, 8), labels.dtype)
+    for i in range(N):
+        res[i][0] = labels[i][-1]
+        res[i][1] = labels[i][-2]
+        res[i][2] = labels[i][-3]
+        res[i][3] = object_index[i]
+        res[i, 4:] = labels[i, :4]
+
+    np.save(PATH_RESULT + '/info_' + video_name, res)
 if __name__ == '__main__':
     video_names = os.listdir(PATH_VID)
     for video_name in video_names:
         if(video_name.endswith(".mp4")):
         # if(video_name == "cam_6_snow.mp4"):
-            process(video_name)
+            # process(video_name)
+            process_split(video_name)
