@@ -3,6 +3,7 @@ import os
 import matplotlib.path as mplPath
 import cv2
 PATH_ROI = "../data/AIC20_track1/ROIs"
+PATH_MOI = "./MOIs/"
 PATH_VIDEO = "../data/AIC20_track1/Dataset_A"
 PATH_TRACKING = "../Center_net/new_iou_info_tracking"
 # PATH_TRACKING = "../Center_net/info_split"
@@ -19,6 +20,24 @@ def load_roi():
             content_list = [(int(point.split(',')[0]), int(point.split(',')[1])) for point in content_list]
             roi_list[file_name[:-4]] = content_list
     return roi_list
+
+def load_moi():
+    moi_list = {}
+    '''
+        moi_list is a dictionary, each key is video name and its corresponding mask
+        each value in each key is also a dictionary.This dictionary has key as movement_id in
+        video and value is the the mask of the movement in binary 
+    '''
+    print("Extracting MOI")
+    for folder_name in os.listdir(PATH_MOI):
+        moi_list[folder_name] = {}
+        for file_name in os.listdir(os.path.join(PATH_MOI, folder_name)):
+            if file_name.endswith(".npy"):
+                movement_id = file_name.split("_")[-1][:-4]
+                full_path_name = os.path.join(PATH_MOI, folder_name, file_name)
+                content = np.load(full_path_name)
+                moi_list[folder_name][movement_id] = content
+    return moi_list
 
 def out_of_roi(center, poly):
     path_array = []
@@ -79,7 +98,21 @@ def draw_roi(roi_list, image):
         start_point = end_point
     return image
 
-def car_counting(vid_name, roi_list):
+def voting(point, vote_movement, obj_id, moi_list):
+    # one vote for each time point lying inside MOI
+    exist_MOI = False
+    if obj_id not in vote_movement:
+        vote_movement[obj_id] = {}
+    for moi_id in moi_list:
+        moi_content = moi_list[moi_id]
+        if moi_content[int(point[1])][int(point[0])] == True:
+            if moi_id not in vote_movement[obj_id]:
+                vote_movement[obj_id][moi_id] = 0
+            vote_movement[obj_id][moi_id] += 1
+            exist_MOI = True
+    return vote_movement, exist_MOI
+
+def car_counting(vid_name, roi_list, moi_list):
     video_name = vid_name+".mp4"
     print("Processing", vid_name)
     tracking_info = np.load(PATH_TRACKING + '/info_' + video_name + '.npy', allow_pickle = True)
@@ -97,13 +130,23 @@ def car_counting(vid_name, roi_list):
 
     num_truck_out = 0
     already_count = []
+    vote_movement = {} # each key is obj_id, each value is A dictionary. Each key in A is movement_id, each value in A is count vote for that object to the corresponding 
+    num_car_out = {} # each key is mv_id, each value count number of car 
+    num_truck_out = {} # each key is mv_id, each value count number of truck
+
+
     for fr_id in range(1, max(frame_id)+1):
         index_cur_fr = np.where(frame_id==fr_id)[0]
         for index_box in index_cur_fr:
+
             cur_box = tracking_info[index_box][4:]
             cur_center = center_box(cur_box)
-            is_inside_roi = validate_center(cur_center, False, roi_list)
             cur_obj_id = tracking_info[index_box][3]
+
+            is_inside_roi = validate_center(cur_center, False, roi_list)
+            vote_movement, inside_MOI = voting(cur_center, vote_movement, cur_obj_id, moi_list)
+            if not inside_MOI:
+                continue 
             if not is_inside_roi:# current car is outside roi
                 count_out, count_in, is_ok = find_latest_object_and_vote_direction(frame_id, fr_id, tracking_info, 10, cur_obj_id, roi_list, width, height)
                 if is_ok: #exist object
@@ -111,13 +154,19 @@ def car_counting(vid_name, roi_list):
                     # is_inside_roi_pre_obj = validate_center(pre_obj_center, False, roi_list)
                     if count_in>=count_out and cur_obj_id not in already_count: # previous car lies inside roi
                         already_count.append(cur_obj_id)
+                        max_movement_id = max(vote_movement[cur_obj_id], key=vote_movement[cur_obj_id].get)
                         if tracking_info[index_box][0] == 1:
-                            num_car_out += 1
-                            num_object_out = num_car_out
+                            if max_movement_id not in num_car_out:
+                                num_car_out[max_movement_id] = 0
+                            num_car_out[max_movement_id] += 1
+                            num_object_out = num_car_out[max_movement_id]
+
                         else:
-                            num_truck_out += 1
-                            num_object_out = num_truck_out
-                        results.append([fr_id, num_object_out, cur_center[0], cur_center[1]])
+                            if max_movement_id not in num_truck_out:
+                                num_truck_out[max_movement_id] = 0
+                            num_truck_out[max_movement_id] += 1
+                            num_object_out = num_truck_out[max_movement_id]
+                        results.append([fr_id, num_object_out, cur_center[0], cur_center[1], max_movement_id])
             else : # using offset to refine again
                 is_out = out_of_range_bbox(tracking_info[index_box], width, height, 2)
                 if is_out:
@@ -127,13 +176,20 @@ def car_counting(vid_name, roi_list):
                         # is_inside_roi_pre_obj = validate_center(pre_obj_center, False, roi_list)
                         if count_in>=count_out and cur_obj_id not in already_count: # previous car lies inside roi
                             already_count.append(cur_obj_id)
+                            max_movement_id = max(vote_movement[cur_obj_id], key=vote_movement[cur_obj_id].get)
+                            
                             if tracking_info[index_box][0] == 1:
-                                num_car_out += 1
-                                num_object_out = num_car_out
+                                if max_movement_id not in num_car_out:
+                                    num_car_out[max_movement_id] = 0
+                                num_car_out[max_movement_id] += 1
+                                num_object_out = num_car_out[max_movement_id]
+
                             else:
-                                num_truck_out += 1
-                                num_object_out = num_truck_out
-                            results.append([fr_id, num_object_out, cur_center[0], cur_center[1]])
+                                if max_movement_id not in num_truck_out:
+                                    num_truck_out[max_movement_id] = 0
+                                num_truck_out[max_movement_id] += 1
+                                num_object_out = num_truck_out[max_movement_id]
+                            results.append([fr_id, num_object_out, cur_center[0], cur_center[1], max_movement_id])
     if VISUALIZED:
         output = cv2.VideoWriter(PATH_VIDEO_OUT + '/' + vid_name + '.mp4', cv2.VideoWriter_fourcc('M','J','P','G'), 5.0, (width, height))
         idx = 0
@@ -152,7 +208,7 @@ def car_counting(vid_name, roi_list):
                 for result_id in indx_cur_fr:
                     cur_annotate = results[result_id] 
                     count_object = cur_annotate[1]
-                    cv2.putText(annotate_fr, str(count_object).zfill(5), (cur_annotate[2], cur_annotate[3]), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2,cv2.LINE_AA) 
+                    cv2.putText(annotate_fr, cur_annotate[-1]+"-"+str(count_object).zfill(5), (int(cur_annotate[2]), int(cur_annotate[3])), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2,cv2.LINE_AA) 
             output.write(annotate_fr)
             if idx == 900:
                 break
@@ -161,8 +217,9 @@ def car_counting(vid_name, roi_list):
     return results
 
 if __name__ == "__main__":
+    moi_list = load_moi()
     roi_list = load_roi()
     for video_name in os.listdir(PATH_VIDEO):
         if video_name .endswith(".mp4"):
             roi_vid_name = video_name[:-4].split("_")[0]+ "_" + video_name[:-4].split("_")[1]
-            results = car_counting(video_name[:-4], roi_list[roi_vid_name])
+            results = car_counting(video_name[:-4], roi_list[roi_vid_name], moi_list[roi_vid_name])
