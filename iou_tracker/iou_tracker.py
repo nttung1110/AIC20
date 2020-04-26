@@ -10,10 +10,13 @@ import os
 import cv2
 import numpy as np
 from iou_tracker.util import load_mot, iou
-PATH_RESULT = './Center_net/new_iou_info_tracking'
-PATH_SVID = './Center_net/new_iou_tracker_visualized'
-# PATH_RESULT = './dla_backbone/new_iou_info_tracking'
-# PATH_SVID = './dla_backbone/new_iou_tracker_visualized'
+# PATH_RESULT = './Center_net/new_iou_info_tracking'
+# PATH_SVID = './Center_net/new_iou_tracker_visualized'
+# PATH_RESULT = './dla_backbone/new_iou_info_tracking_skip1'
+PATH_RESULT = './dla_backbone/new_iou_info_tracking_skip1_sample'
+PATH_SVID = './dla_backbone/new_iou_tracker_visualized_skip1'
+# PATH_RESULT = './resnet50_backbone/new_iou_info_tracking'
+# PATH_SVID = './resnet50_backbone/new_iou_tracker_visualized'
 def track_iou_edited(vid_name, detections, sigma_l, sigma_h, sigma_iou, t_min):
     """
     Simple IOU based tracker.
@@ -30,7 +33,7 @@ def track_iou_edited(vid_name, detections, sigma_l, sigma_h, sigma_iou, t_min):
     Returns:
         list: list of tracks.
     """
-    visualize = False
+    visualize = True
     video_path = os.path.join("./data/AIC20_track1/Dataset_A", vid_name+".mp4")
     idx = 0
     print(video_path)
@@ -44,62 +47,64 @@ def track_iou_edited(vid_name, detections, sigma_l, sigma_h, sigma_iou, t_min):
     all_tracks = []
     tracks_finished = []
     duration = time.time()
+    skip_frame = 2
 
 
     while (input.isOpened()):
         ret, frame = input.read()
         if not ret:
             break
-        frame_num = idx
-        detections_frame = detections[frame_num]
+        if idx%skip_frame==0:
+            frame_num = idx
+            detections_frame = detections[frame_num]
 
-        dets = [det for det in detections_frame if det['score'] >= sigma_l]
+            dets = [det for det in detections_frame if det['score'] >= sigma_l]
 
-        updated_tracks = []
-        for track_id, track in enumerate(tracks_active):
-            if track == "Done":
-                continue
-            if len(dets) > 0:
-                # get det with highest iou
-                best_match = max(dets, key=lambda x: iou(track['bboxes'][-1], x['bbox']))
-                if iou(track['bboxes'][-1], best_match['bbox']) >= sigma_iou and best_match['class']==track['class']:
-                    track['bboxes'].append(best_match['bbox'])
-                    track['max_score'] = max(track['max_score'], best_match['score'])
-                    track['conf_score'].append(best_match['score'])
-                    updated_tracks.append(track)
-                    #
-                    # remove from best matching detection from detections
-                    del dets[dets.index(best_match)]
-            # if track was not updated
-            if len(updated_tracks) == 0 or track is not updated_tracks[-1]:
-                # finish track when the conditions are met
-                tracks_active[track_id] = "Done"
+            updated_tracks = []
+            for track_id, track in enumerate(tracks_active):
+                if track == "Done":
+                    continue
+                if len(dets) > 0:
+                    # get det with highest iou
+                    best_match = max(dets, key=lambda x: iou(track['bboxes'][-1], x['bbox']))
+                    if iou(track['bboxes'][-1], best_match['bbox']) >= sigma_iou and best_match['class']==track['class']:
+                        track['bboxes'].append(best_match['bbox'])
+                        # track['max_score'] = max(track['max_score'], best_match['score'])
+                        track['conf_score'].append(best_match['score'])
+                        updated_tracks.append(track)
+                        #
+                        # remove from best matching detection from detections
+                        del dets[dets.index(best_match)]
+                # if track was not updated
+                if len(updated_tracks) == 0 or track is not updated_tracks[-1]:
+                    # finish track when the conditions are met
+                    tracks_active[track_id] = "Done"
 
-        # create new tracks
-        new_tracks = [{'bboxes': [det['bbox']], 'max_score': det['score'], 'start_frame': frame_num, 'class':det['class'], 'conf_score':[det['score']]} for det in dets]
-        tracks_active = tracks_active + new_tracks
+            # create new tracks
+            new_tracks = [{'bboxes': [det['bbox']], 'max_score': det['score'], 'start_frame': frame_num, 'class':det['class'], 'conf_score':[det['score']]} for det in dets]
+            tracks_active = tracks_active + new_tracks
 
-        info_fr = []
-        class_text = ['None', 'car', 'truck']
+            info_fr = []
+            class_text = ['None', 'car', 'truck']
 
-        for track_id, track in enumerate(tracks_active):
-            if track == "Done":
-                continue
+            for track_id, track in enumerate(tracks_active):
+                if track == "Done":
+                    continue
 
-            box = track['bboxes'][-1]
-            obj_id = track_id
-            class_id = track['class']
-            score = track['conf_score'][-1]
-            # recording
-            info_tracking.append([class_id, idx, score, obj_id, box[0], box[1], box[2], box[3]])
+                box = track['bboxes'][-1]
+                obj_id = track_id
+                class_id = track['class']
+                score = track['conf_score'][-1]
+                # recording
+                info_tracking.append([class_id, idx, score, obj_id, box[0], box[1], box[2], box[3]])
+                if visualize == True:
+                    cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 3 )
+                    cv2.putText(frame, class_text[class_id]+str(obj_id).zfill(5), (box[0], box[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2,cv2.LINE_AA) 
             if visualize == True:
-                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 0, 255), 3 )
-                cv2.putText(frame, class_text[class_id]+str(obj_id).zfill(5), (box[0], box[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 0), 2,cv2.LINE_AA) 
+                output.write(frame)
+            # print(idx)
         if idx == 900:
             break
-        if visualize == True:
-            output.write(frame)
-        # print(idx)
         idx += 1
     input.release()
     if visualize == True:
