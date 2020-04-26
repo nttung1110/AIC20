@@ -1,3 +1,0 @@
-change lib64 in setup.py
-demo demo_AIC
-remember to export CUDAHOME /usr/local/cuda
